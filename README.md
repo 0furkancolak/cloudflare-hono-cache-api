@@ -24,6 +24,27 @@ This repository is no longer a simple route-cache demo. It is intended to be a p
 
 ## Architecture Summary
 
+## Redis vs Cloudflare Cache API
+
+| Topic | Cloudflare Cache API | Redis |
+| --- | --- | --- |
+| Primary use | HTTP response caching at the edge | Application data cache / shared state |
+| Best fit | Full route or response caching | Object/query/session caching |
+| Geographic behavior | Closest edge/location cache | Depends on where Redis is deployed |
+| Cache key model | Request/response oriented | Arbitrary string key/value |
+| Invalidation | Purge by file/tag, HTTP-aware | Delete keys manually or by pattern |
+| Auth-sensitive responses | Possible, but must be carefully tenant-scoped | Safer for per-user/per-tenant data shaping |
+| Shared consistency | Not a shared global datastore | Central/shared cache datastore |
+| Latency profile | Very fast on cache hit at edge | Fast, but still network hop to Redis |
+| Stale-while-revalidate | Natural fit for public HTTP caching | Must be implemented in application logic |
+| Good default here | Public response cache, selective tenant-safe route cache | Backing store for counters, sessions, shared metadata, registry |
+
+Short rule of thumb:
+
+- Use Cloudflare Cache API when you want to cache HTTP responses close to the user.
+- Use Redis when you need shared mutable cache/state across regions or workers.
+- Use both together when edge response caching is useful, but invalidation metadata or application state must stay centralized.
+
 ### Public cache
 
 - `GET /products/:id`

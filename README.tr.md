@@ -26,6 +26,27 @@ bir production referansi sunmak.
 
 ## Mimari Ozeti
 
+## Redis vs Cloudflare Cache API
+
+| Konu | Cloudflare Cache API | Redis |
+| --- | --- | --- |
+| Temel kullanim | Edge uzerinde HTTP response cache | Uygulama veri cache'i / paylasilan state |
+| En uygun senaryo | Tam route veya response cache | Obje/query/session cache |
+| Cografi davranis | Kullaniciya en yakin edge lokasyonda calisir | Redis'in kuruldugu bolgeye baglidir |
+| Cache key modeli | Request/response odakli | Serbest string key/value |
+| Invalidation | File/tag purge, HTTP semantiklerine uygun | Key silme veya pattern bazli temizleme |
+| Auth hassas veri | Mumkun, ama tenant scope cok dikkatli kurulmalidir | User/tenant bazli veri icin daha guvenli |
+| Paylasilan tutarlilik | Global ortak datastore degildir | Merkezi/paylasilan cache datastore |
+| Latency profili | Edge HIT durumunda cok hizli | Hizli ama yine de Redis'e network gidisi var |
+| Stale-while-revalidate | Public HTTP cache icin dogal uyumlu | Uygulama mantiginda ayrica kurulmalidir |
+| Bu repo icin iyi varsayilan | Public response cache, secili tenant-safe route cache | Counter, session, shared metadata, registry gibi paylasilan alanlar |
+
+Kisa kural:
+
+- Kullaniciya yakin HTTP response cache istiyorsaniz Cloudflare Cache API kullanin.
+- Region/worker'lar arasinda paylasilan mutable cache veya state istiyorsaniz Redis kullanin.
+- Edge response cache faydali ama invalidation metadata veya uygulama state'i merkezi kalmaliysa ikisini birlikte kullanin.
+
 ### Public cache
 
 - `GET /products/:id`
