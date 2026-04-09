@@ -2,7 +2,17 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cloudflare-hono-cache-api",
   "main": "src/index.ts",
-  "compatibility_date": "2026-04-09"
+  "compatibility_date": "2026-04-09",
+  "vars": {
+    "ENVIRONMENT": "development",
+    "LOG_LEVEL": "info",
+    "JWT_ISSUER": "https://cache-api.local",
+    "JWT_AUDIENCE": "cache-api",
+    "JWT_JWKS_URL": "http://127.0.0.1:3497/.well-known/jwks.json",
+    "CACHE_KEY_VERSION": "v1",
+    "DEBUG_CACHE_HEADERS": "false",
+    "CORS_ALLOW_ORIGINS": ""
+  }
   // "compatibility_flags": [
   //   "nodejs_compat"
   // ],

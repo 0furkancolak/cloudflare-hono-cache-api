@@ -1,8 +1,16 @@
 export const CACHE_TAG_KEYS = {
   products: 'products',
-  product: 'product',
+  profiles: 'profiles',
 } as const
 
 export function getProductTag(productId: string): string {
-  return `${CACHE_TAG_KEYS.product}:${productId}`
+  return `product:${productId}`
+}
+
+export function getTenantTag(accountId: string): string {
+  return `tenant:${accountId}`
+}
+
+export function getProfileTag(accountId: string): string {
+  return `profile:${accountId}`
 }

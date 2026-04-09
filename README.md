@@ -1,103 +1,248 @@
-# Hono + Cloudflare Route Cache (Workers Cache API)
+# Cloudflare Hono Cache API
 
-Harici servis kullanmadan (`Redis/KV` yok), yalnızca `caches.default` ile middleware seviyesinde route cache yönetimi sağlar.
+[Turkce README](./README.tr.md)
 
-## Kurulum
+If you only want the cache layer in your own project, copy these files first:
+
+```txt
+src/middleware/route-cache.ts
+src/cache/cache-key.ts
+src/cache/invalidate.ts
+src/cache/purge.ts
+src/cache/tags.ts
+```
+
+Do not copy the bundled example store into production as-is. It exists only to keep this repository self-contained for demos and tests.
+
+This repository is no longer a simple route-cache demo. It is intended to be a production-oriented reference for `Hono + Cloudflare Workers` with:
+
+- JWT/JWKS-based authentication
+- tenant isolation
+- explicit public/private/bypass cache policies
+- Cloudflare-native purge compatibility
+- local smoke, load, performance, and stress verification
+
+## Architecture Summary
+
+### Public cache
+
+- `GET /products/:id`
+- Suitable for edge caching
+- Uses `Cache-Control: public, s-maxage=...`
+- Produces deterministic cache keys
+- Adds `Cache-Tag` values such as `products` and `product:<id>`
+- `stale-while-revalidate` is meaningful here because CDN/browser layers can honor it
+
+### Private allowlist cache
+
+- `GET /accounts/:accountId/profile`
+- Requires authentication
+- The default resolver can derive tenant identity from claims such as `account_id`, `tenant_id`, `org_id`, or `workspace_id`
+- `x-account-id` is only a helper signal; if it does not match the resolved tenant, the request is rejected
+- Private cache keys use derived identity like `tenant:<id>` instead of raw `Authorization` values
+- Worker-managed private cache currently behaves as TTL cache only; `stale-while-revalidate` is not promised for `caches.default`
+
+### Critical data
+
+- `GET /accounts/:accountId/balance`
+- Always `BYPASS`
+- Uses `Cache-Control: no-store`
+
+### Purge
+
+- Mutation routes generate exact cache-key and tag purge targets
+- In production, if `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ZONE_ID` are provided, the Cloudflare purge API is used
+- In local/test mode, exact file purges are simulated through `caches.default`
+- Tag-only purge is not supported in simulate mode; it hard-fails or soft-fails truthfully depending on `requireSuccessfulPurge`
+- The old in-memory tag registry is gone
+
+## Authentication
+
+JWT verification enforces `JWKS + iss + aud + exp + nbf`.
+
+Required environment variables:
+
+```txt
+JWT_JWKS_URL
+JWT_ISSUER
+JWT_AUDIENCE
+```
+
+Recommended optional variables:
+
+```txt
+AUTH_PROVIDER
+AUTH_TENANT_CLAIM
+AUTH_SCOPE_CLAIM
+AUTH_ROLES_CLAIM
+CACHE_KEY_VERSION
+ENVIRONMENT
+LOG_LEVEL
+DEBUG_CACHE_HEADERS
+JWKS_CACHE_TTL_SECONDS
+CLOUDFLARE_ZONE_ID
+CLOUDFLARE_API_TOKEN
+PURGE_HMAC_SECRET
+CORS_ALLOW_ORIGINS
+```
+
+Examples:
+
+```txt
+# Supabase
+AUTH_PROVIDER=supabase
+AUTH_TENANT_CLAIM=org_id
+
+# Better Auth or a custom gateway
+AUTH_PROVIDER=better-auth
+AUTH_TENANT_CLAIM=workspace_id
+AUTH_SCOPE_CLAIM=permissions
+AUTH_ROLES_CLAIM=roles
+```
+
+Current limitation:
+
+- The bundled verifier supports `RS256` only
+
+## Local Development
+
+Install:
 
 ```txt
 bun install
 ```
 
-## Geliştirme
+Run:
 
 ```txt
 bun run dev
 ```
 
-Not: Local geliştirme portu `3497` olarak ayarlıdır.
+The default local port is `3497`.
 
-## Deploy
+This repository includes a development JWKS and private key only for local testing and smoke flows. They must not be used in production.
 
-```txt
-bun run deploy
-```
-
-## Bindings Type Üretimi
+Generate a dev token:
 
 ```txt
-bun run cf-typegen
+ACCOUNT_ID=acc-1 bun run dev:token
 ```
 
-## Cache Mimarisi
+## Smoke Test
 
-- `src/middleware/route-cache.ts`: Route bazında dinamik cache middleware
-- `src/cache/cache-key.ts`: Deterministik cache key üretimi (path/query/vary header/cookie)
-- `src/cache/invalidate.ts`: URL veya tag tabanlı invalidation helper'ları
-
-Varsayılan middleware davranışı:
-
-- Sadece `GET/HEAD` cachelenir
-- `X-Cache-Status: HIT | MISS | BYPASS` başlığı döner
-- `Cache-Control` yoksa otomatik `public, s-maxage=<ttl>, stale-while-revalidate=<swr>` eklenir
-- `no-store/private` veya 4xx/5xx cevaplar cachelenmez
-
-## Route Örnekleri
-
-- `GET /products/:id`: Cachelenebilir örnek route
-- `POST /products/:id/update`: Ürünü günceller ve ilgili cache'i invalidate eder
-- `GET /me`: `Authorization` varsa cache bypass
-- `POST /products/:id/refresh`: Internal helper ile ilgili ürün cache kaydını siler
-- `POST /cache/invalidate`: Secret korumalı endpoint ile URL/tag invalidation
-
-## Middleware Kullanımı
-
-```ts
-app.get(
-  '/products/:id',
-  routeCacheMiddleware({
-    ttlSeconds: 120,
-    staleWhileRevalidateSeconds: 60,
-    includeQuery: true,
-    varyHeaders: ['Accept-Language'],
-    varyCookies: ['locale'],
-    tags: (c) => [getProductTag(c.req.param('id') ?? ''), CACHE_TAG_KEYS.products],
-  }),
-  handler
-)
-```
-
-## Invalidate Endpoint Kullanımı
-
-Önce secret tanımla:
+With the worker running:
 
 ```txt
-wrangler secret put CACHE_INVALIDATE_SECRET
+bun run smoke
 ```
 
-Sonra endpoint çağır:
+This script verifies:
+
+- public route `MISS -> HIT`
+- private allowlist route `MISS -> HIT`
+- critical route `BYPASS`
+- mutation followed by purge and a fresh `MISS`
+- HMAC-protected admin purge endpoint
+
+## Load Test
+
+Basic benchmark:
 
 ```txt
-curl -X POST http://127.0.0.1:3497/cache/invalidate \
-  -H "Content-Type: application/json" \
-  -H "x-cache-secret: <SECRET>" \
-  -d '{"urls":["/products/42"],"tags":["products","product:42"]}'
+bun run load
 ```
 
-## Update Route Ornegi (Cache Invalidate)
+Optional variables:
 
 ```txt
-curl -X POST http://127.0.0.1:3497/products/42/update \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Product-42-Updated"}'
+BASE_URL=http://127.0.0.1:3497
+CONCURRENCY=16
+DURATION_SECONDS=10
+ACCOUNT_ID=acc-1
 ```
 
-Bu endpoint:
-- veriyi gunceller
-- `/products/42` cache kaydini invalidate eder
-- cache doldurma yapmaz; sonraki `GET /products/:id` istegi cache'i yeniden olusturur
+## Tests
 
-## Önemli Notlar
+Run the full suite:
 
-- Workers Cache API anahtarları listelenemediği için wildcard/pattern purge doğrudan desteklenmez.
-- Bu projede tag invalidation, worker isolate içindeki in-memory registry ile uygulanır.
-- Çoklu instance/colo senaryolarında tam küresel invalidation için Cloudflare Cache Tags + zone purge API veya KV/D1 tabanlı registry gerekebilir.
+```txt
+bun test
+```
+
+Current coverage includes:
+
+- query normalization
+- public/private cache key isolation
+- JWT claim extraction and audience validation
+- public `MISS -> HIT`
+- private auth enforcement
+- tenant mismatch rejection
+- purge after mutation
+- JWKS refresh on key rotation
+- critical route `BYPASS`
+- admin purge auth failure
+- hard and soft failure behavior for simulate-mode tag purge
+- request-id sanitization
+- CORS behavior across non-production and production-style bindings
+- tenant isolation under mixed traffic and mutation churn
+
+Performance regression test:
+
+```txt
+bun run test:perf
+```
+
+This runs the app in-process with warmed cache and verifies a loose `p95` budget for public/private cache hits. It is a regression alarm, not a capacity benchmark.
+
+Heavier mixed-traffic stress test:
+
+```txt
+bun run test:stress
+```
+
+This runs two tenants under warmed cache, repeated reads, and mutation churn, and verifies that one tenant's mutation never leaks into another tenant's cached data.
+
+## Reusable vs Example-only Files
+
+Reusable:
+
+```txt
+src/cache/cache-key.ts
+src/cache/invalidate.ts
+src/cache/purge.ts
+src/cache/tags.ts
+src/middleware/route-cache.ts
+```
+
+Example-only:
+
+```txt
+src/store/example-store.ts
+src/dev/jwks.ts
+scripts/generate-dev-jwt.ts
+scripts/generate-admin-signature.ts
+scripts/smoke-cache.sh
+scripts/load-test.ts
+```
+
+## Route Summary
+
+```txt
+GET  /products/:id
+POST /products/:id
+GET  /accounts/:accountId/profile
+POST /accounts/:accountId/profile
+GET  /accounts/:accountId/balance
+POST /admin/cache/purge
+GET  /admin/health
+GET  /.well-known/jwks.json   # non-production only
+```
+
+## Operational Notes
+
+- `X-Cache-Status` and `X-Cache-Policy` are preserved
+- `DEBUG_CACHE_HEADERS` is off by default; enable it explicitly to receive `X-Cache-Key`
+- Request IDs are sanitized before being echoed/logged
+- CORS is open in non-production and allowlist-driven in production via `CORS_ALLOW_ORIGINS`
+- Request, metric, and purge audit events are structured logs
+- Full native purge behavior should not be expected in production unless Cloudflare zone/token config is provided

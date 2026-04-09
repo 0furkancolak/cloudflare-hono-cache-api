@@ -1,94 +1,63 @@
-import type { Context } from 'hono'
-
+// Copy note:
+// This file converts a route definition into exact purge targets.
+// Keep it next to `cache-key.ts` and call it from mutation handlers so cache invalidation
+// uses the same key derivation logic as cache reads.
+import type { AppEnv, AuthContext, CacheInvalidatePayload } from '../types/env'
 import { buildCacheKeyUrl } from './cache-key'
-import { getTagKeyRegistry } from '../middleware/route-cache'
-import type { AppEnv, CacheInvalidatePayload } from '../types/env'
 
-export interface CacheKeyBuilderOptions {
+interface BuildRoutePurgeTargetOptions {
+  absoluteUrl: string
+  mode: 'public' | 'private'
+  tags?: string[]
   includeQuery?: boolean
   varyHeaders?: string[]
   varyCookies?: string[]
   keyPrefix?: string
+  auth?: AuthContext
+  version?: string
 }
 
-function unique(items: string[]): string[] {
-  return [...new Set(items)]
-}
-
-async function toCacheKeyUrl(
-  context: Context<AppEnv>,
-  url: string,
-  options: CacheKeyBuilderOptions
-): Promise<string> {
-  const absoluteUrl = new URL(url, context.req.url)
-  const request = new Request(absoluteUrl.toString(), {
-    method: 'GET',
-    headers: context.req.raw.headers,
-  })
-
-  return buildCacheKeyUrl(request, {
+export async function buildRoutePurgePayload(options: BuildRoutePurgeTargetOptions): Promise<CacheInvalidatePayload> {
+  const request = new Request(options.absoluteUrl, { method: 'GET' })
+  const cacheKey = await buildCacheKeyUrl(request, {
+    mode: options.mode,
     includeQuery: options.includeQuery ?? true,
     varyHeaders: options.varyHeaders ?? [],
     varyCookies: options.varyCookies ?? [],
     keyPrefix: options.keyPrefix,
+    version: options.version,
+    identity: options.mode === 'private' && options.auth ? [`tenant:${options.auth.tenantId}`] : [],
   })
-}
 
-export async function invalidateByUrls(
-  context: Context<AppEnv>,
-  urls: string[],
-  options: CacheKeyBuilderOptions = {}
-): Promise<{ deleted: string[]; notFound: string[] }> {
-  const cache = caches.default
-  const deleted: string[] = []
-  const notFound: string[] = []
-
-  for (const rawUrl of unique(urls)) {
-    const keyUrl = await toCacheKeyUrl(context, rawUrl, options)
-    const ok = await cache.delete(new Request(keyUrl, { method: 'GET' }))
-    if (ok) {
-      deleted.push(rawUrl)
-      continue
-    }
-    notFound.push(rawUrl)
+  return {
+    files: [cacheKey],
+    tags: options.tags ?? [],
   }
-
-  return { deleted, notFound }
 }
 
-export async function invalidateByTags(tags: string[]): Promise<{ deletedKeys: number; touchedTags: string[] }> {
-  const cache = caches.default
-  const registry = getTagKeyRegistry()
-  let deletedKeys = 0
-  const touchedTags: string[] = []
+export function getAbsoluteUrl(originUrl: string, path: string): string {
+  return new URL(path, originUrl).toString()
+}
 
-  for (const tag of unique(tags)) {
-    const keys = registry.get(tag)
-    if (!keys || keys.size === 0) {
-      continue
+export function mergePurgePayloads(...payloads: CacheInvalidatePayload[]): CacheInvalidatePayload {
+  const files = new Set<string>()
+  const tags = new Set<string>()
+
+  for (const payload of payloads) {
+    for (const file of payload.files ?? []) {
+      files.add(file)
     }
-
-    touchedTags.push(tag)
-    for (const keyUrl of keys) {
-      const deleted = await cache.delete(new Request(keyUrl, { method: 'GET' }))
-      if (deleted) {
-        deletedKeys += 1
-      }
+    for (const tag of payload.tags ?? []) {
+      tags.add(tag)
     }
   }
 
-  return { deletedKeys, touchedTags }
+  return {
+    files: [...files],
+    tags: [...tags],
+  }
 }
 
-export async function invalidateFromPayload(
-  context: Context<AppEnv>,
-  payload: CacheInvalidatePayload,
-  options: CacheKeyBuilderOptions = {}
-): Promise<{
-  urlResult: { deleted: string[]; notFound: string[] }
-  tagResult: { deletedKeys: number; touchedTags: string[] }
-}> {
-  const urlResult = await invalidateByUrls(context, payload.urls ?? [], options)
-  const tagResult = await invalidateByTags(payload.tags ?? [])
-  return { urlResult, tagResult }
+export function getKeyVersion(env: AppEnv['Bindings']): string | undefined {
+  return env.CACHE_KEY_VERSION
 }

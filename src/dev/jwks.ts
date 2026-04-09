@@ -1,0 +1,27 @@
+export const DEV_JWKS = {
+  keys: [
+    {
+      kid: 'dev-rs256',
+      kty: 'RSA',
+      alg: 'RS256',
+      use: 'sig',
+      n: '04UcF4koah4xcbJUbHVmXnQFCEwWFUBTIfxjHGhJ6pSgiZcCswiWh75jJochlLvVPBUdKGLzOaNq8nhocmI8vwJIq6d5WIc3ngBtDZ52vEWf4KIhtV14iqIY85Tjd7AavK4rabyYN1MEEgZ8796NWXVvo7wYPInMzia4u4cG9HXiAUe1yvqsLiumlR6mlGfL_PrFDLnxaSUP1Do8KOQ7JCS6W_cA3cUdnjKWwe4Z55k8ttFKcKFMDv2nubyAYIcX2DUzVcFcXeUAuZFh79R1YWkxvgK0JPtrZvMYXEJMSsX_3fClyw1BwWLTjX7sRuwRRoLZ-9pVZdsawnxBhcmSUw',
+      e: 'AQAB',
+    },
+  ],
+} as const
+
+export const DEV_PRIVATE_JWK = {
+  kid: 'dev-rs256',
+  kty: 'RSA',
+  alg: 'RS256',
+  use: 'sig',
+  n: '04UcF4koah4xcbJUbHVmXnQFCEwWFUBTIfxjHGhJ6pSgiZcCswiWh75jJochlLvVPBUdKGLzOaNq8nhocmI8vwJIq6d5WIc3ngBtDZ52vEWf4KIhtV14iqIY85Tjd7AavK4rabyYN1MEEgZ8796NWXVvo7wYPInMzia4u4cG9HXiAUe1yvqsLiumlR6mlGfL_PrFDLnxaSUP1Do8KOQ7JCS6W_cA3cUdnjKWwe4Z55k8ttFKcKFMDv2nubyAYIcX2DUzVcFcXeUAuZFh79R1YWkxvgK0JPtrZvMYXEJMSsX_3fClyw1BwWLTjX7sRuwRRoLZ-9pVZdsawnxBhcmSUw',
+  e: 'AQAB',
+  d: '-hMQeMMFr8YCrxQnZr4Q9EWMWELx2NjexfpJ3fbEF-j15GClewYBnSYlaL0FoX3GnUJZNrvGKbRgvPWehvLziYsptR2hBF7ZYp8eT6ZfZY2WIqmNMN_8TpYBlKUdnw6V4ygIK6V4UUXU33rMO3bjpuCGcmPvmPin1b3x_8RPH19teU0Xa6C0fYHT2ZT8v_38Lc-UJGwpWvHx8QtSz2HGMn7xr0Zsy9oiDpXVk5acA-vzKq5jxb4OHb62vpLRbh3A5xzRYks--pvpc_hefINDbMwgas5A6JCe1S2io1DwnSH1pTcgHnryZ3ZVAfmv9LDEYLpupW-TQ95St7jASLRB',
+  p: '-jxgGrLZYozpGBw5llFvoXS4JvuQfplny5OxiWqgyeEVefHkhv9fe5-gPZyPefHRwz_xFED6rMGZZeK2gNfzdfJZAeUclChFBAvY_u5axqGZ_z0NHBCyFRJA5CVYE2_cee-n9g2jZDwqM589FQvmHU1-cX1M-QNOakTJ9uohx6k',
+  q: '2GRt5OppW5L7zZs6EItx59mhjcEXJb-UIatly61QezQrm5wSYiAi34itgZu1TfgmPDV_CUGVSbZxFpJE9WFxXM6Sj8BWbysIra7yndOei9dw2GJJC1oUKtuiBQEbEpIcWdquqPj0PcJWc40CqZ1h0TyLngcfN7Q35G-Px8ipl5s',
+  dp: 'SNsVPBDAfBH8t7lYBuz07HQ4PZlWy5VMhBgfQ5wY7k4rW5LS738gxLSICggwOdfvM8LFJRl6IpxHVkO40TCOwNNrmMKlHHnRBkmQx0CMi3J3jLmwvHAb-UiUPhilWRtjfNkK9Pepj8B4pQkC1sLdH8D1RIOvynxs80HN76bhaOk',
+  dq: 'TH80WjiEBltvqL-3RyIEonHNKs-X30BanYx58AbU7LkEsX37AbVanqsyqx7geS_AVIiU4DDPFb_pOpF6z0QjTyu3pBnadHJCHyQ5oJGu-sCuo9AbAmhVuNDr9djuOSJt41XraNCZhzusVC0FQ_DfI5jDwpnB729GUvsdWQMW8QE',
+  qi: 'w17HPf3BiWIYcK08F6peIcoYY8RNQmoasEiX3pdimvY-DQiD7icGe0mz5Q-HhQT7dgPMBRL7m-dig5B3aRompuvA69nI6jOZ94uWeyndUeu9OVgt-FpYoDZfIkDE9m3ZwfAHnI13YQSAQ3sMQR6qJmzszH0p0S3BlGzxtvNA5s8',
+} as const

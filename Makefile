@@ -1,4 +1,16 @@
-.PHONY: test
+.PHONY: test perf smoke load
 
 test:
-	./scripts/smoke-cache.sh
+	bun test
+
+perf:
+	bun run test:perf
+
+stress:
+	bun run test:stress
+
+smoke:
+	bash scripts/smoke-cache.sh
+
+load:
+	bun run scripts/load-test.ts
