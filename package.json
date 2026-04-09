@@ -1,0 +1,15 @@
+{
+  "name": "cloudflare-hono-cache-api",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 3497",
+    "deploy": "wrangler deploy --minify",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings"
+  },
+  "dependencies": {
+    "hono": "^4.12.12"
+  },
+  "devDependencies": {
+    "wrangler": "^4.4.0"
+  }
+}
