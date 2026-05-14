@@ -6,6 +6,7 @@
 import type { Context, MiddlewareHandler } from 'hono'
 import type { AppEnv, CachePolicyMode, CacheStatus } from '../types/env'
 import { buildCacheKeyUrl, type CacheKeyOptions } from '../cache/cache-key'
+import { buildEncryptedPrivateCacheResponse, decryptPrivateCacheHit } from '../cache/private-cache-storage'
 import { recordMetric } from '../observability/metrics'
 
 type CacheTagResolver = (context: Context<AppEnv>) => string[] | Promise<string[]>
@@ -145,7 +146,7 @@ export function routeCacheMiddleware(options: RouteCacheOptions): MiddlewareHand
       recordMetric(metricName(merged.mode, 'BYPASS'), 1, {}, c.env)
       await next()
       c.res = setStatusHeaders(c, c.res, 'BYPASS')
-      return
+      return c.res
     }
 
     if (merged.mode === 'private' && !c.get('auth')) {
@@ -153,7 +154,7 @@ export function routeCacheMiddleware(options: RouteCacheOptions): MiddlewareHand
       recordMetric(metricName(merged.mode, 'BYPASS'), 1, {}, c.env)
       await next()
       c.res = setStatusHeaders(c, c.res, 'BYPASS')
-      return
+      return c.res
     }
 
     const keyUrl = await buildCacheKeyUrl(c.req.raw, buildKeyOptions(c, merged))
@@ -164,10 +165,15 @@ export function routeCacheMiddleware(options: RouteCacheOptions): MiddlewareHand
     const hit = await cache.match(cacheRequest)
 
     if (hit) {
-      c.set('cacheStatus', 'HIT')
-      recordMetric(metricName(merged.mode, 'HIT'), 1, {}, c.env)
-      c.res = setStatusHeaders(c, hit, 'HIT')
-      return
+      const hitResponse = merged.mode === 'private' ? await decryptPrivateCacheHit(hit, c.env) : hit
+      if (!hitResponse) {
+        // Corrupt or undecryptable cache entries are treated as misses so the origin can refresh them.
+      } else {
+        c.set('cacheStatus', 'HIT')
+        recordMetric(metricName(merged.mode, 'HIT'), 1, {}, c.env)
+        c.res = setStatusHeaders(c, hitResponse, 'HIT')
+        return c.res
+      }
     }
 
     await next()
@@ -176,7 +182,7 @@ export function routeCacheMiddleware(options: RouteCacheOptions): MiddlewareHand
     recordMetric(metricName(merged.mode, 'MISS'), 1, {}, c.env)
     if (!isCacheableResponse(merged.mode, c.res)) {
       c.res = setStatusHeaders(c, c.res, 'MISS')
-      return
+      return c.res
     }
 
     const headers = new Headers(c.res.headers)
@@ -190,13 +196,25 @@ export function routeCacheMiddleware(options: RouteCacheOptions): MiddlewareHand
       headers.set('Cache-Tag', tags.join(','))
     }
 
-    const cachedResponse = new Response(c.res.body, {
+    const responseBody = new Uint8Array(await c.res.arrayBuffer())
+    const clientResponse = new Response(responseBody, {
       status: c.res.status,
       statusText: c.res.statusText,
       headers,
     })
+    const cachedResponse =
+      merged.mode === 'private'
+        ? await buildEncryptedPrivateCacheResponse(clientResponse.clone(), headers, c.env)
+        : new Response(responseBody, {
+            status: c.res.status,
+            statusText: c.res.statusText,
+            headers,
+          })
 
-    await cache.put(cacheRequest, cachedResponse.clone())
-    c.res = setStatusHeaders(c, cachedResponse, 'MISS')
+    if (cachedResponse) {
+      await cache.put(cacheRequest, cachedResponse.clone())
+    }
+    c.res = setStatusHeaders(c, clientResponse, 'MISS')
+    return c.res
   }
 }

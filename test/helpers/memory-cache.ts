@@ -14,6 +14,10 @@ export class MemoryCache {
     return this.store.delete(request.url)
   }
 
+  entries(): Array<[string, Response]> {
+    return [...this.store.entries()].map(([key, response]) => [key, response.clone()])
+  }
+
   clear(): void {
     this.store.clear()
   }

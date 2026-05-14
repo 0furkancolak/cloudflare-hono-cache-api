@@ -52,6 +52,7 @@ export interface AppBindings {
   AUTH_ROLES_CLAIM?: string
   CACHE_KEY_VERSION?: string
   DEBUG_CACHE_HEADERS?: string
+  PRIVATE_CACHE_ENCRYPTION_KEY?: string
   JWKS_CACHE_TTL_SECONDS?: string
   CLOUDFLARE_ZONE_ID?: string
   CLOUDFLARE_API_TOKEN?: string

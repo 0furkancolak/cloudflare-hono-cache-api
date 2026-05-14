@@ -31,6 +31,13 @@ export function logInfo(bindings: Partial<AppBindings> | undefined, payload: unk
   console.log(JSON.stringify(payload))
 }
 
+export function logMetric(bindings: Partial<AppBindings> | undefined, payload: unknown): void {
+  if (!shouldLog(bindings, 'info')) {
+    return
+  }
+  console.log(JSON.stringify(payload, null, 2))
+}
+
 export function logError(bindings: Partial<AppBindings> | undefined, payload: unknown): void {
   if (!shouldLog(bindings, 'error')) {
     return

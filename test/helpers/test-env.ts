@@ -14,6 +14,7 @@ export function createBindings(overrides: Partial<AppBindings> = {}): AppBinding
     JWT_AUDIENCE: 'cache-api',
     CACHE_KEY_VERSION: 'test-v1',
     DEBUG_CACHE_HEADERS: 'false',
+    PRIVATE_CACHE_ENCRYPTION_KEY: 'test-private-cache-encryption-key',
     ...overrides,
   }
 }

@@ -10,6 +10,7 @@
     "JWT_AUDIENCE": "cache-api",
     "JWT_JWKS_URL": "http://127.0.0.1:3497/.well-known/jwks.json",
     "CACHE_KEY_VERSION": "v1",
+    "PRIVATE_CACHE_ENCRYPTION_KEY": "development-only-private-cache-encryption-key",
     "DEBUG_CACHE_HEADERS": "false",
     "CORS_ALLOW_ORIGINS": ""
   }

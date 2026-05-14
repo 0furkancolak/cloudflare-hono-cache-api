@@ -1,5 +1,6 @@
 {
   "name": "cloudflare-hono-cache-api",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --port 3497",

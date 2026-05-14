@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
+import { Hono } from 'hono'
 import { createApp } from '../src/index'
 import { DEV_JWKS } from '../src/dev/jwks'
+import { PRIVATE_CACHE_ENCRYPTION_HEADER } from '../src/cache/private-cache-crypto'
+import { routeCacheMiddleware } from '../src/middleware/route-cache'
+import type { AppEnv } from '../src/types/env'
 import { createBindings, installJwksFetch, installMemoryCache, makeAdminHeaders, makeAuthHeader } from './helpers/test-env'
 
 describe('application integration', () => {
@@ -70,6 +74,215 @@ describe('application integration', () => {
     expect(second.headers.get('X-Cache-Status')).toBe('HIT')
     expect(forbidden.status).toBe(403)
     restoreFetch()
+  })
+
+  it('stores private cache bodies encrypted and returns decrypted hits', async () => {
+    const cache = installMemoryCache()
+    const bindings = createBindings()
+    const restoreFetch = installJwksFetch(bindings, DEV_JWKS)
+    const headers = await makeAuthHeader('acc-1')
+
+    const first = await app.fetch(
+      new Request('https://app.test/accounts/acc-1/profile', {
+        headers,
+      }),
+      bindings
+    )
+    const firstBody = await first.clone().text()
+    const second = await app.fetch(
+      new Request('https://app.test/accounts/acc-1/profile', {
+        headers,
+      }),
+      bindings
+    )
+    const secondBody = await second.text()
+    const entries = cache.entries()
+    const stored = entries.find(([url]) => url.includes('/accounts/acc-1/profile'))?.[1]
+    const storedBody = stored ? await stored.clone().text() : ''
+
+    expect(first.headers.get('X-Cache-Status')).toBe('MISS')
+    expect(second.headers.get('X-Cache-Status')).toBe('HIT')
+    expect(secondBody).toBe(firstBody)
+    expect(stored?.headers.get(PRIVATE_CACHE_ENCRYPTION_HEADER)).toBe('aes-256-gcm-v1')
+    expect(storedBody).not.toContain('Tenant-acc-1')
+    restoreFetch()
+  })
+
+  it('does not store private cache entries when the encryption key is missing', async () => {
+    const cache = installMemoryCache()
+    const bindings = createBindings({
+      PRIVATE_CACHE_ENCRYPTION_KEY: '',
+    })
+    const restoreFetch = installJwksFetch(bindings, DEV_JWKS)
+    const headers = await makeAuthHeader('acc-1')
+
+    const first = await app.fetch(
+      new Request('https://app.test/accounts/acc-1/profile', {
+        headers,
+      }),
+      bindings
+    )
+    const second = await app.fetch(
+      new Request('https://app.test/accounts/acc-1/profile', {
+        headers,
+      }),
+      bindings
+    )
+
+    expect(first.headers.get('X-Cache-Status')).toBe('MISS')
+    expect(second.headers.get('X-Cache-Status')).toBe('MISS')
+    expect(cache.entries().length).toBe(0)
+    restoreFetch()
+  })
+
+  it('encrypts sensitive private cache headers at rest and restores them on hit', async () => {
+    const cache = installMemoryCache()
+    const privateApp = new Hono<AppEnv>()
+    privateApp.use('*', async (c, next) => {
+      c.set('auth', {
+        subject: 'user-1',
+        tenantId: 'tenant-secret',
+        scopes: [],
+        roles: [],
+        issuer: 'issuer',
+        audience: ['audience'],
+        expiresAt: Math.floor(Date.now() / 1000) + 60,
+      })
+      await next()
+    })
+    privateApp.get(
+      '/private',
+      routeCacheMiddleware({
+        mode: 'private',
+      }),
+      (c) => {
+        c.header('X-Tenant-Id', 'tenant-secret')
+        return c.json({ secret: 'body-secret' })
+      }
+    )
+    const bindings = createBindings()
+
+    const first = await privateApp.fetch(new Request('https://app.test/private'), bindings)
+    const second = await privateApp.fetch(new Request('https://app.test/private'), bindings)
+    const stored = cache.entries()[0]?.[1]
+    const storedBody = stored ? await stored.clone().text() : ''
+
+    expect(first.headers.get('X-Cache-Status')).toBe('MISS')
+    expect(second.headers.get('X-Cache-Status')).toBe('HIT')
+    expect(second.headers.get('X-Tenant-Id')).toBe('tenant-secret')
+    expect(stored?.headers.get('X-Tenant-Id')).toBeNull()
+    expect(storedBody).not.toContain('tenant-secret')
+    expect(storedBody).not.toContain('body-secret')
+  })
+
+  it('records private cache encryption and decryption duration metrics', async () => {
+    const bindings = createBindings({
+      LOG_LEVEL: 'info',
+    })
+    const restoreFetch = installJwksFetch(bindings, DEV_JWKS)
+    const originalLog = console.log
+    const logs: string[] = []
+    console.log = (message?: unknown) => {
+      logs.push(String(message))
+    }
+
+    try {
+      const headers = await makeAuthHeader('acc-1')
+      await app.fetch(
+        new Request('https://app.test/accounts/acc-1/profile', {
+          headers,
+        }),
+        bindings
+      )
+      await app.fetch(
+        new Request('https://app.test/accounts/acc-1/profile', {
+          headers,
+        }),
+        bindings
+      )
+    } finally {
+      console.log = originalLog
+      restoreFetch()
+    }
+
+    const metrics = logs.map(
+      (line) =>
+        JSON.parse(line) as {
+          level?: string
+          name?: string
+          value?: string
+          valueMs?: string
+          valueUs?: number
+          displayValue?: string
+          bodyBytes?: number
+        }
+    )
+    const encryptMetric = metrics.find((entry) => entry.name === 'cache.private.encrypt.duration_ms')
+    const decryptMetric = metrics.find((entry) => entry.name === 'cache.private.decrypt.duration_ms')
+
+    expect(encryptMetric?.displayValue).toMatch(/^\d+\.\d{6} ms$/)
+    expect(decryptMetric?.displayValue).toMatch(/^\d+\.\d{6} ms$/)
+    expect(encryptMetric?.value).toMatch(/^\d+\.\d{6}$/)
+    expect(decryptMetric?.valueMs).toMatch(/^\d+\.\d{6}$/)
+    expect(encryptMetric?.valueUs).toBeGreaterThanOrEqual(0)
+    expect(encryptMetric?.bodyBytes).toBeGreaterThan(0)
+    expect(decryptMetric?.bodyBytes).toBeGreaterThan(0)
+  })
+
+  it('records body size metrics for large encrypted private cache bodies', async () => {
+    const cache = installMemoryCache()
+    const largeBody = 'x'.repeat(128 * 1024)
+    const privateApp = new Hono<AppEnv>()
+    privateApp.use('*', async (c, next) => {
+      c.set('auth', {
+        subject: 'user-large',
+        tenantId: 'tenant-large',
+        scopes: [],
+        roles: [],
+        issuer: 'issuer',
+        audience: ['audience'],
+        expiresAt: Math.floor(Date.now() / 1000) + 60,
+      })
+      await next()
+    })
+    privateApp.get(
+      '/large-private',
+      routeCacheMiddleware({
+        mode: 'private',
+      }),
+      (c) => c.text(largeBody)
+    )
+    const bindings = createBindings({
+      LOG_LEVEL: 'info',
+    })
+    const originalLog = console.log
+    const logs: string[] = []
+    console.log = (message?: unknown) => {
+      logs.push(String(message))
+    }
+
+    let first: Response
+    let second: Response
+    try {
+      first = await privateApp.fetch(new Request('https://app.test/large-private'), bindings)
+      second = await privateApp.fetch(new Request('https://app.test/large-private'), bindings)
+    } finally {
+      console.log = originalLog
+    }
+
+    const storedBody = await cache.entries()[0][1].clone().text()
+    const metrics = logs.map((line) => JSON.parse(line) as { name?: string; bodyBytes?: number; displayValue?: string })
+    const encryptMetric = metrics.find((entry) => entry.name === 'cache.private.encrypt.duration_ms')
+    const decryptMetric = metrics.find((entry) => entry.name === 'cache.private.decrypt.duration_ms')
+
+    expect(first.headers.get('X-Cache-Status')).toBe('MISS')
+    expect(second.headers.get('X-Cache-Status')).toBe('HIT')
+    expect(await second.text()).toBe(largeBody)
+    expect(storedBody).not.toContain(largeBody.slice(0, 256))
+    expect(encryptMetric?.bodyBytes).toBe(largeBody.length)
+    expect(decryptMetric?.bodyBytes).toBe(largeBody.length)
+    expect(encryptMetric?.displayValue).toMatch(/^\d+\.\d{6} ms$/)
+    expect(decryptMetric?.displayValue).toMatch(/^\d+\.\d{6} ms$/)
   })
 
   it('purges product cache after mutation', async () => {
