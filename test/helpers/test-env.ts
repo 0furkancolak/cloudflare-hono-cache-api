@@ -2,6 +2,7 @@ import type { AppBindings } from '../../src/types/env'
 import { createDevJwt } from '../../scripts/lib/dev-auth'
 import { createAdminSignature } from '../../scripts/lib/dev-auth'
 import { DEV_JWKS } from '../../src/dev/jwks'
+import { PHOTOS_UPSTREAM_URL } from '../../src/store/photos-feed'
 import { MemoryCache } from './memory-cache'
 
 export function createBindings(overrides: Partial<AppBindings> = {}): AppBindings {
@@ -33,6 +34,26 @@ export function installJwksFetch(bindings: AppBindings, jwks: unknown = DEV_JWKS
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
     if (url === bindings.JWT_JWKS_URL) {
       return new Response(JSON.stringify(jwks), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+    }
+    return originalFetch(input as RequestInfo, init)
+  }) as typeof fetch
+
+  return () => {
+    globalThis.fetch = originalFetch
+  }
+}
+
+export function installPhotosUpstreamFetch(fixture: unknown): () => void {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    if (url === PHOTOS_UPSTREAM_URL) {
+      return new Response(JSON.stringify(fixture), {
         status: 200,
         headers: {
           'Content-Type': 'application/json',

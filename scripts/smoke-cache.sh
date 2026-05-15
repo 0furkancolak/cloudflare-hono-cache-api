@@ -62,6 +62,27 @@ grep -Ei "HTTP/|X-Cache-Status|X-Cache-Policy|X-Cache-Key|Cache-Control|Content-
 jq . /tmp/profile2.json
 
 echo
+echo "== 5a) Private Photos Feed Ilk Istek (MISS, upstream + encrypt) =="
+echo
+curl -s -D /tmp/h4a.txt "$BASE_URL/accounts/$ACCOUNT_ID/photos-feed" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "x-account-id: $ACCOUNT_ID" \
+  -o /tmp/photos1.json
+grep -Ei "HTTP/|X-Cache-Status|X-Cache-Policy|X-Cache-Key|Cache-Control|Content-Type" /tmp/h4a.txt
+jq '{source, multiplier, count, firstId: .photos[0].id, lastId: .photos[-1].id}' /tmp/photos1.json
+echo "Not: encrypt/decrypt sure metrikleri icin worker loglarina bakin (displayValue, bodyBytes)."
+
+echo
+echo "== 5b) Private Photos Feed Ikinci Istek (HIT, decrypt) =="
+echo
+curl -s -D /tmp/h4b.txt "$BASE_URL/accounts/$ACCOUNT_ID/photos-feed" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "x-account-id: $ACCOUNT_ID" \
+  -o /tmp/photos2.json
+grep -Ei "HTTP/|X-Cache-Status|X-Cache-Policy|X-Cache-Key|Cache-Control|Content-Type" /tmp/h4b.txt
+jq '{source, multiplier, count, firstId: .photos[0].id, lastId: .photos[-1].id}' /tmp/photos2.json
+
+echo
 echo "== 6) Critical Balance (BYPASS) =="
 echo
 curl -s -D /tmp/h5.txt "$BASE_URL/accounts/$ACCOUNT_ID/balance" \

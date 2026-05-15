@@ -5,7 +5,14 @@ import { DEV_JWKS } from '../src/dev/jwks'
 import { PRIVATE_CACHE_ENCRYPTION_HEADER } from '../src/cache/private-cache-crypto'
 import { routeCacheMiddleware } from '../src/middleware/route-cache'
 import type { AppEnv } from '../src/types/env'
-import { createBindings, installJwksFetch, installMemoryCache, makeAdminHeaders, makeAuthHeader } from './helpers/test-env'
+import {
+  createBindings,
+  installJwksFetch,
+  installMemoryCache,
+  installPhotosUpstreamFetch,
+  makeAdminHeaders,
+  makeAuthHeader,
+} from './helpers/test-env'
 
 describe('application integration', () => {
   const app = createApp()
@@ -212,21 +219,89 @@ describe('application integration', () => {
           name?: string
           value?: string
           valueMs?: string
-          valueUs?: number
+          valueUs?: string
+          valueNs?: number
+          unit?: string
           displayValue?: string
           bodyBytes?: number
         }
     )
     const encryptMetric = metrics.find((entry) => entry.name === 'cache.private.encrypt.duration_ms')
     const decryptMetric = metrics.find((entry) => entry.name === 'cache.private.decrypt.duration_ms')
+    const durationDisplayPattern = /^(\d+\.\d{6} ms|\d+\.\d{3} µs)$/
 
-    expect(encryptMetric?.displayValue).toMatch(/^\d+\.\d{6} ms$/)
-    expect(decryptMetric?.displayValue).toMatch(/^\d+\.\d{6} ms$/)
+    expect(encryptMetric?.displayValue).toMatch(durationDisplayPattern)
+    expect(decryptMetric?.displayValue).toMatch(durationDisplayPattern)
     expect(encryptMetric?.value).toMatch(/^\d+\.\d{6}$/)
     expect(decryptMetric?.valueMs).toMatch(/^\d+\.\d{6}$/)
-    expect(encryptMetric?.valueUs).toBeGreaterThanOrEqual(0)
+    expect(encryptMetric?.valueUs).toMatch(/^\d+\.\d{3}$/)
+    expect(decryptMetric?.valueUs).toMatch(/^\d+\.\d{3}$/)
+    expect(encryptMetric?.valueNs).toBeGreaterThanOrEqual(0)
+    expect(decryptMetric?.valueNs).toBeGreaterThanOrEqual(0)
     expect(encryptMetric?.bodyBytes).toBeGreaterThan(0)
     expect(decryptMetric?.bodyBytes).toBeGreaterThan(0)
+  })
+
+  it('serves photos feed as MISS then HIT with 10x upstream data', async () => {
+    const upstreamFixture = [
+      {
+        albumId: 1,
+        id: 1,
+        title: 'photo-1',
+        url: 'https://example.test/1.jpg',
+        thumbnailUrl: 'https://example.test/1-thumb.jpg',
+      },
+      {
+        albumId: 1,
+        id: 2,
+        title: 'photo-2',
+        url: 'https://example.test/2.jpg',
+        thumbnailUrl: 'https://example.test/2-thumb.jpg',
+      },
+    ]
+    const bindings = createBindings()
+    const restoreJwksFetch = installJwksFetch(bindings, DEV_JWKS)
+    const restorePhotosFetch = installPhotosUpstreamFetch(upstreamFixture)
+    const headers = await makeAuthHeader('acc-1')
+
+    try {
+      const first = await app.fetch(
+        new Request('https://app.test/accounts/acc-1/photos-feed', {
+          headers,
+        }),
+        bindings
+      )
+      const second = await app.fetch(
+        new Request('https://app.test/accounts/acc-1/photos-feed', {
+          headers,
+        }),
+        bindings
+      )
+
+      expect(first.headers.get('X-Cache-Status')).toBe('MISS')
+      expect(second.headers.get('X-Cache-Status')).toBe('HIT')
+
+      const firstBody = (await first.json()) as {
+        multiplier: number
+        count: number
+        photos: Array<{ id: number }>
+      }
+      const secondBody = (await second.json()) as {
+        multiplier: number
+        count: number
+        photos: Array<{ id: number }>
+      }
+
+      expect(firstBody.multiplier).toBe(10)
+      expect(firstBody.count).toBe(upstreamFixture.length * 10)
+      expect(firstBody.photos).toHaveLength(upstreamFixture.length * 10)
+      expect(secondBody.count).toBe(firstBody.count)
+      expect(secondBody.photos[0]?.id).toBe(1)
+      expect(secondBody.photos[upstreamFixture.length]?.id).toBe(1)
+    } finally {
+      restorePhotosFetch()
+      restoreJwksFetch()
+    }
   })
 
   it('records body size metrics for large encrypted private cache bodies', async () => {
@@ -271,9 +346,19 @@ describe('application integration', () => {
     }
 
     const storedBody = await cache.entries()[0][1].clone().text()
-    const metrics = logs.map((line) => JSON.parse(line) as { name?: string; bodyBytes?: number; displayValue?: string })
+    const metrics = logs.map(
+      (line) =>
+        JSON.parse(line) as {
+          name?: string
+          bodyBytes?: number
+          displayValue?: string
+          valueUs?: string
+          valueNs?: number
+        }
+    )
     const encryptMetric = metrics.find((entry) => entry.name === 'cache.private.encrypt.duration_ms')
     const decryptMetric = metrics.find((entry) => entry.name === 'cache.private.decrypt.duration_ms')
+    const durationDisplayPattern = /^(\d+\.\d{6} ms|\d+\.\d{3} µs)$/
 
     expect(first.headers.get('X-Cache-Status')).toBe('MISS')
     expect(second.headers.get('X-Cache-Status')).toBe('HIT')
@@ -281,8 +366,10 @@ describe('application integration', () => {
     expect(storedBody).not.toContain(largeBody.slice(0, 256))
     expect(encryptMetric?.bodyBytes).toBe(largeBody.length)
     expect(decryptMetric?.bodyBytes).toBe(largeBody.length)
-    expect(encryptMetric?.displayValue).toMatch(/^\d+\.\d{6} ms$/)
-    expect(decryptMetric?.displayValue).toMatch(/^\d+\.\d{6} ms$/)
+    expect(encryptMetric?.displayValue).toMatch(durationDisplayPattern)
+    expect(decryptMetric?.displayValue).toMatch(durationDisplayPattern)
+    expect(encryptMetric?.valueUs).toMatch(/^\d+\.\d{3}$/)
+    expect(decryptMetric?.valueNs).toBeGreaterThanOrEqual(0)
   })
 
   it('purges product cache after mutation', async () => {

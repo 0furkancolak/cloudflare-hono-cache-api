@@ -15,6 +15,36 @@ type MetricName =
   | 'purge.failure'
   | 'purge.success'
 
+function formatDurationFields(valueMs: number): {
+  unit: 'ms' | 'us'
+  valueMs: string
+  valueUs: string
+  valueNs: number
+  displayValue: string
+} {
+  const valueMsFormatted = valueMs.toFixed(6)
+  const valueUsNumber = valueMs * 1000
+  const valueUsFormatted = valueUsNumber.toFixed(3)
+
+  if (valueMs < 1) {
+    return {
+      unit: 'us',
+      valueMs: valueMsFormatted,
+      valueUs: valueUsFormatted,
+      valueNs: Math.round(valueMs * 1_000_000),
+      displayValue: `${valueUsFormatted} µs`,
+    }
+  }
+
+  return {
+    unit: 'ms',
+    valueMs: valueMsFormatted,
+    valueUs: valueUsFormatted,
+    valueNs: Math.round(valueMs * 1_000_000),
+    displayValue: `${valueMsFormatted} ms`,
+  }
+}
+
 export function recordMetric(
   name: MetricName,
   value = 1,
@@ -23,17 +53,18 @@ export function recordMetric(
   fields: Record<string, string | number | boolean> = {}
 ): void {
   const isDuration = name.endsWith('.duration_ms')
-  const formattedValue = value.toFixed(6)
+  const durationFields = isDuration ? formatDurationFields(value) : null
   logMetric(bindings, {
     level: 'metric',
     name,
-    value: isDuration ? formattedValue : value,
-    ...(isDuration
+    value: durationFields ? durationFields.valueMs : value,
+    ...(durationFields
       ? {
-          unit: 'ms',
-          valueMs: formattedValue,
-          valueUs: Math.round(value * 1000),
-          displayValue: `${formattedValue} ms`,
+          unit: durationFields.unit,
+          valueMs: durationFields.valueMs,
+          valueUs: durationFields.valueUs,
+          valueNs: durationFields.valueNs,
+          displayValue: durationFields.displayValue,
         }
       : {}),
     tags,

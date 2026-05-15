@@ -3,7 +3,7 @@ import type { Context } from 'hono'
 
 import { buildRoutePurgePayload, getAbsoluteUrl, getKeyVersion, mergePurgePayloads } from './cache/invalidate'
 import { purgeCache, getPurgeHmacSecret, verifyPurgeSignature } from './cache/purge'
-import { CACHE_TAG_KEYS, getProductTag, getProfileTag, getTenantTag } from './cache/tags'
+import { CACHE_TAG_KEYS, getPhotosFeedTag, getProductTag, getProfileTag, getTenantTag } from './cache/tags'
 import { DEV_JWKS } from './dev/jwks'
 import { optionalAuth, requireAuth, requireScope } from './middleware/auth'
 import { requestContextMiddleware } from './middleware/request-context'
@@ -12,6 +12,7 @@ import { securityHeadersMiddleware } from './middleware/security-headers'
 import type { AppEnv, AuthContext, CacheInvalidatePayload } from './types/env'
 import { recordMetric } from './observability/metrics'
 import { getOrCreateBalance, getOrCreateProduct, getOrCreateProfile, setProduct, setProfile } from './store/example-store'
+import { fetchAndExpandPhotos } from './store/photos-feed'
 import { cors } from 'hono/cors'
 
 const cacheKeyCommon = {
@@ -119,6 +120,7 @@ export function createApp(): Hono<AppEnv> {
         publicProduct: 'GET /products/:id',
         productMutation: 'POST /products/:id',
         privateProfile: 'GET /accounts/:accountId/profile',
+        privatePhotosFeed: 'GET /accounts/:accountId/photos-feed',
         criticalBalance: 'GET /accounts/:accountId/balance',
         profileMutation: 'POST /accounts/:accountId/profile',
         adminPurge: 'POST /admin/cache/purge',
@@ -213,6 +215,42 @@ export function createApp(): Hono<AppEnv> {
 
       await wait(250)
       return c.json(getOrCreateProfile(auth.tenantId))
+    }
+  )
+
+  app.get(
+    '/accounts/:accountId/photos-feed',
+    requireAuth,
+    routeCacheMiddleware({
+      mode: 'private',
+      ttlSeconds: 120,
+      staleWhileRevalidateSeconds: 30,
+      includeQuery: true,
+      varyHeaders: [],
+      varyCookies: [],
+      tags: (c) => {
+        const accountId = c.req.param('accountId') ?? ''
+        return [CACHE_TAG_KEYS.photos, getTenantTag(accountId), getPhotosFeedTag(accountId)]
+      }
+    }),
+    async (c) => {
+      const auth = c.get('auth')
+      if (!auth) {
+        recordMetric('auth.jwt.failure', 1, {}, c.env)
+        return c.json({ error: 'Unauthorized' }, 401)
+      }
+
+      const denial = ensureTenantAccess(c, auth)
+      if (denial) {
+        return denial
+      }
+
+      try {
+        return c.json(await fetchAndExpandPhotos())
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Photos feed upstream failed'
+        return c.json({ error: 'UpstreamFailed', message }, 502)
+      }
     }
   )
 
